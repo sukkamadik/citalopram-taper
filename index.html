@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Nedtrapning" />
+  <meta name="theme-color" content="#0b130b" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>Citalopram Nedtrapning</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0b130b; color: #e2f0e2; font-family: 'DM Sans', sans-serif; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0b130b; }
+    ::-webkit-scrollbar-thumb { background: #2d4a2d; border-radius: 2px; }
+    .row:active { background: #1a2e1a !important; }
+    .tab-btn { cursor: pointer; border: none; background: none; transition: all 0.2s; -webkit-tap-highlight-color: transparent; }
+    .nav-btn { cursor: pointer; border: none; background: none; -webkit-tap-highlight-color: transparent; }
+    .nav-btn:disabled { opacity: 0.2; }
+    .check-btn { cursor: pointer; border: none; -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+
+  <script>
+  const { useState, useEffect } = React;
+
+  const TAPER_SCHEDULE = [
+    { from: 25, to: 22 },
+    { from: 22, to: 19 },
+    { from: 19, to: 17 },
+    { from: 17, to: 15 },
+    { from: 15, to: 13 },
+    { from: 13, to: 12 },
+    { from: 12, to: 11 },
+    { from: 11, to: 9.6 },
+    { from: 9.6, to: 8.6 },
+    { from: 8.6, to: 7.7 },
+  ];
+
+  const DAYS = 28;
+  const STORAGE_KEY = 'citalopram_v1';
+
+  function getDoses(from, to) {
+    return Array.from({ length: DAYS }, (_, i) => {
+      const dose = from - ((from - to) / (DAYS - 1)) * i;
+      return Math.round(dose * 100) / 100;
+    });
+  }
+
+  function getDiscard(from, dose) {
+    return Math.round((from - dose) * 10) / 10;
+  }
+
+  function loadState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch(e) {}
+    return { phase: 0, checked: {}, tab: 'today' };
+  }
+
+  function saveState(state) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch(e) {}
+  }
+
+  function App() {
+    const initial = loadState();
+    const [phase, setPhase] = useState(initial.phase || 0);
+    const [checked, setChecked] = useState(initial.checked || {});
+    const [tab, setTab] = useState(initial.tab || 'today');
+
+    useEffect(() => {
+      saveState({ phase, checked, tab });
+    }, [phase, checked, tab]);
+
+    const interval = TAPER_SCHEDULE[phase];
+    const doses = getDoses(interval.from, interval.to);
+    const totalPhases = TAPER_SCHEDULE.length;
+    const checkedInPhase = Object.values(checked[phase] || {}).filter(Boolean).length;
+    const phaseComplete = checkedInPhase === DAYS;
+    const todayIdx = doses.findIndex((_, i) => !checked[phase]?.[i]);
+    const todayDose = todayIdx >= 0 ? doses[todayIdx] : null;
+    const todayDiscard = todayDose !== null ? getDiscard(interval.from, todayDose) : null;
+
+    const toggle = (day) => setChecked(prev => ({
+      ...prev,
+      [phase]: { ...(prev[phase] || {}), [day]: !(prev[phase]?.[day]) }
+    }));
+
+    const totalDone = Object.values(checked).reduce((s, d) => s + Object.values(d).filter(Boolean).length, 0);
+    const totalDays = totalPhases * DAYS;
+    const overallPct = Math.round((totalDone / totalDays) * 100);
+
+    return React.createElement('div', {
+      style: { minHeight: '100vh', background: '#0b130b', color: '#e2f0e2', fontFamily: "'DM Sans', sans-serif", paddingBottom: 60 }
+    },
+      // Header
+      React.createElement('div', { style: { padding: '28px 24px 18px', borderBottom: '1px solid #1a2a1a', background: '#0d160d' } },
+        React.createElement('div', { style: { maxWidth: 480, margin: '0 auto' } },
+          React.createElement('p', { style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#4a7a4a', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 4 } }, 'Citalopram nedtrapning'),
+          React.createElement('h1', { style: { fontFamily: "'Playfair Display', serif", fontSize: 26, fontWeight: 700, color: '#c8e6c8', marginBottom: 14 } }, `${interval.from} → ${interval.to} mg`),
+          // Progress bar
+          React.createElement('div', { style: { marginBottom: 12 } },
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 5, fontSize: 11, color: '#4a7a4a', fontFamily: "'DM Mono', monospace" } },
+              React.createElement('span', null, 'Samlet fremgang'),
+              React.createElement('span', null, `${overallPct}% · dag ${totalDone}/${totalDays}`)
+            ),
+            React.createElement('div', { style: { height: 3, background: '#1a2a1a', borderRadius: 2, overflow: 'hidden' } },
+              React.createElement('div', { style: { width: `${overallPct}%`, height: '100%', background: 'linear-gradient(90deg, #166534, #4ade80)', borderRadius: 2, transition: 'width 0.5s' } })
+            )
+          ),
+          // Phase dots
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+            ...TAPER_SCHEDULE.map((_, i) => {
+              const done = Object.values(checked[i] || {}).filter(Boolean).length === DAYS;
+              const active = i === phase;
+              return React.createElement('div', {
+                key: i,
+                onClick: () => { setPhase(i); setTab('today'); },
+                style: { width: active ? 20 : 7, height: 7, borderRadius: 4, cursor: 'pointer', transition: 'all 0.2s',
+                  background: active ? '#4ade80' : done ? '#166534' : '#1e3a1e',
+                  border: active ? 'none' : '1px solid #2d4a2d' }
+              });
+            }),
+            React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#4a7a4a', marginLeft: 2 } }, `Fase ${phase + 1}/${totalPhases}`)
+          )
+        )
+      ),
+
+      // Tabs
+      React.createElement('div', { style: { maxWidth: 480, margin: '16px auto 0', padding: '0 24px' } },
+        React.createElement('div', { style: { display: 'flex', gap: 3, background: '#0f1f0f', borderRadius: 10, padding: 3, border: '1px solid #1e3a1e' } },
+          ...[['today', 'I dag'], ['list', 'Alle dage'], ['overview', 'Faser']].map(([t, label]) =>
+            React.createElement('button', {
+              key: t, className: 'tab-btn', onClick: () => setTab(t),
+              style: { flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 12, fontFamily: "'DM Mono', monospace",
+                color: tab === t ? '#86efac' : '#4a7a4a', background: tab === t ? '#166534' : 'none' }
+            }, label)
+          )
+        )
+      ),
+
+      // Content
+      React.createElement('div', { style: { maxWidth: 480, margin: '14px auto 0', padding: '0 24px' } },
+
+        // TODAY TAB
+        tab === 'today' && (
+          phaseComplete
+            ? React.createElement('div', { style: { background: '#0a1f0a', border: '1px solid #4ade80', borderRadius: 12, padding: 20, textAlign: 'center' } },
+                React.createElement('p', { style: { fontSize: 24, marginBottom: 8 } }, '🎉'),
+                React.createElement('p', { style: { color: '#86efac', fontWeight: 500, marginBottom: 12 } }, `Fase ${phase + 1} fuldført!`),
+                phase < totalPhases - 1 && React.createElement('button', {
+                  onClick: () => setPhase(phase + 1),
+                  style: { padding: '8px 20px', background: '#166534', color: '#86efac', border: 'none', borderRadius: 8, fontFamily: "'DM Mono', monospace", fontSize: 13, cursor: 'pointer' }
+                }, `Start fase ${phase + 2} →`)
+              )
+            : React.createElement('div', null,
+                // Dose card
+                React.createElement('div', { style: { background: '#0f1f0f', border: '1px solid #2d4a2d', borderRadius: 12, padding: '16px 20px', marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                  React.createElement('div', null,
+                    React.createElement('p', { style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#4a7a4a', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 } }, `Dag ${todayIdx + 1} af 28`),
+                    React.createElement('div', { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
+                      React.createElement('span', { style: { fontFamily: "'Playfair Display', serif", fontSize: 48, fontWeight: 700, color: '#86efac', lineHeight: 1 } }, todayDose?.toFixed(2)),
+                      React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 15, color: '#4ade80' } }, 'mg')
+                    )
+                  ),
+                  React.createElement('button', {
+                    className: 'check-btn', onClick: () => toggle(todayIdx),
+                    style: { width: 52, height: 52, borderRadius: 13,
+                      border: checked[phase]?.[todayIdx] ? 'none' : '2px solid #2d4a2d',
+                      background: checked[phase]?.[todayIdx] ? '#166534' : '#0b130b',
+                      color: checked[phase]?.[todayIdx] ? '#86efac' : '#4a7a4a',
+                      fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }
+                  }, checked[phase]?.[todayIdx] ? '✓' : '○')
+                ),
+                // Prescription
+                React.createElement('div', { style: { background: '#0f1f0f', border: '1px solid #2d4a2d', borderRadius: 12, overflow: 'hidden', marginBottom: 12 } },
+                  React.createElement('div', { style: { padding: '10px 16px', borderBottom: '1px solid #1a2a1a' } },
+                    React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#4a7a4a', letterSpacing: '0.12em', textTransform: 'uppercase' } }, 'Dagens forskrift')
+                  ),
+                  React.createElement('div', { style: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 } },
+                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                      React.createElement('span', { style: { fontSize: 13, color: '#8ab88a' } }, 'Opløs ½ tablet i'),
+                      React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 16, color: '#86efac' } }, `${interval.from},0 ml vand`)
+                    ),
+                    React.createElement('div', { style: { height: 1, background: '#1a2a1a' } }),
+                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                      React.createElement('span', { style: { fontSize: 13, color: '#8ab88a' } }, 'Smid ud med 1ml sprøjte'),
+                      React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 28, fontWeight: 500, color: '#4ade80' } }, `${todayDiscard?.toFixed(1)} ml`)
+                    ),
+                    React.createElement('div', { style: { height: 1, background: '#1a2a1a' } }),
+                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                      React.createElement('span', { style: { fontSize: 13, color: '#8ab88a' } }, 'Drik resten'),
+                      React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 16, color: '#86efac' } }, `${(interval.from - (todayDiscard || 0)).toFixed(1)} ml`)
+                    )
+                  )
+                ),
+                // Phase progress
+                React.createElement('div', { style: { background: '#0f1f0f', border: '1px solid #1e3a1e', borderRadius: 10, padding: '12px 16px' } },
+                  React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 11, color: '#4a7a4a', fontFamily: "'DM Mono', monospace" } },
+                    React.createElement('span', null, `Fase ${phase + 1} fremgang`),
+                    React.createElement('span', null, `${checkedInPhase}/${DAYS} dage`)
+                  ),
+                  React.createElement('div', { style: { height: 4, background: '#1a2a1a', borderRadius: 2, overflow: 'hidden' } },
+                    React.createElement('div', { style: { width: `${(checkedInPhase / DAYS) * 100}%`, height: '100%', background: '#4ade80', borderRadius: 2, transition: 'width 0.4s' } })
+                  )
+                )
+              )
+        ),
+
+        // LIST TAB
+        tab === 'list' && React.createElement('div', null,
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 } },
+            React.createElement('button', { className: 'nav-btn', disabled: phase === 0, onClick: () => setPhase(p => p - 1), style: { color: '#4a7a4a', fontSize: 22, padding: '4px 8px' } }, '←'),
+            React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 11, color: '#4a7a4a' } }, `Fase ${phase + 1}: ${interval.from} → ${interval.to} mg`),
+            React.createElement('button', { className: 'nav-btn', disabled: phase === totalPhases - 1, onClick: () => setPhase(p => p + 1), style: { color: '#4a7a4a', fontSize: 22, padding: '4px 8px' } }, '→')
+          ),
+          React.createElement('div', { style: { background: '#0f1f0f', border: '1px solid #1e3a1e', borderRadius: 12, overflow: 'hidden' } },
+            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '48px 1fr 72px 72px 32px', gap: 8, padding: '8px 14px', borderBottom: '1px solid #1a2a1a' } },
+              ...['Dag', 'Dosis', 'Smid ud', 'Drik', ''].map((h, i) =>
+                React.createElement('span', { key: i, style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#4a7a4a', textAlign: i >= 2 ? 'right' : 'left' } }, h)
+              )
+            ),
+            ...doses.map((dose, i) => {
+              const isChecked = checked[phase]?.[i] || false;
+              const isToday = i === todayIdx && !phaseComplete;
+              const discard = getDiscard(interval.from, dose);
+              const drink = Math.round((interval.from - discard) * 10) / 10;
+              return React.createElement('div', {
+                key: i, className: 'row', onClick: () => toggle(i),
+                style: { display: 'grid', gridTemplateColumns: '48px 1fr 72px 72px 32px', gap: 8, padding: '9px 14px',
+                  borderBottom: i < DAYS - 1 ? '1px solid #111d11' : 'none',
+                  background: isToday ? '#131f13' : 'transparent',
+                  borderLeft: isToday ? '3px solid #4ade80' : '3px solid transparent' }
+              },
+                React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 11, color: isToday ? '#4ade80' : '#4a7a4a', alignSelf: 'center' } }, i + 1),
+                React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 12, color: '#c8e6c8', alignSelf: 'center' } }, `${dose.toFixed(2)} mg`),
+                React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 12, color: '#4ade80', textAlign: 'right', alignSelf: 'center' } }, `${discard.toFixed(1)} ml`),
+                React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 12, color: '#86efac', textAlign: 'right', alignSelf: 'center' } }, `${drink.toFixed(1)} ml`),
+                React.createElement('div', { style: { width: 22, height: 22, borderRadius: 6, border: isChecked ? 'none' : '1px solid #2d4a2d',
+                  background: isChecked ? '#166534' : '#0b130b', color: isChecked ? '#86efac' : '#4a7a4a',
+                  fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', justifySelf: 'center', alignSelf: 'center' } },
+                  isChecked ? '✓' : '·'
+                )
+              );
+            })
+          )
+        ),
+
+        // OVERVIEW TAB
+        tab === 'overview' && React.createElement('div', { style: { background: '#0f1f0f', border: '1px solid #1e3a1e', borderRadius: 12, overflow: 'hidden' } },
+          ...TAPER_SCHEDULE.map((p, i) => {
+            const done = Object.values(checked[i] || {}).filter(Boolean).length;
+            const pct = Math.round((done / DAYS) * 100);
+            const active = i === phase;
+            const complete = pct === 100;
+            return React.createElement('div', {
+              key: i, className: 'row', onClick: () => { setPhase(i); setTab('today'); },
+              style: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
+                borderBottom: i < TAPER_SCHEDULE.length - 1 ? '1px solid #111d11' : 'none',
+                background: active ? '#131f13' : 'transparent',
+                borderLeft: active ? '3px solid #4ade80' : '3px solid transparent' }
+            },
+              React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: active ? '#4ade80' : '#4a7a4a', minWidth: 16 } }, i + 1),
+              React.createElement('div', { style: { flex: 1 } },
+                React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13, color: complete ? '#4ade80' : active ? '#c8e6c8' : '#6b9a6b' } },
+                  React.createElement('span', null, `${p.from} → ${p.to} mg`),
+                  React.createElement('span', { style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#4a7a4a' } }, complete ? '✓' : `${pct}%`)
+                ),
+                React.createElement('div', { style: { height: 3, background: '#1a2a1a', borderRadius: 2, overflow: 'hidden' } },
+                  React.createElement('div', { style: { width: `${pct}%`, height: '100%', background: complete ? '#166534' : '#4ade80', borderRadius: 2 } })
+                )
+              )
+            );
+          }),
+          React.createElement('div', { style: { padding: '12px 16px', borderTop: '1px solid #1a2a1a' } },
+            React.createElement('p', { style: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: '#2d5a2d', lineHeight: 1.6 } }, 'Fase 11–29 tilføjes næste år med fortyndingsmetode.')
+          )
+        )
+      )
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+
+  // Register service worker for offline use
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js');
+    });
+  }
+  </script>
+</body>
+</html>
