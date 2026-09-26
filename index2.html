@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; min-height: 100vh; padding-bottom: 60px; }
+    ::-webkit-scrollbar { width: 4px; }
+    .row { cursor: pointer; transition: background 0.1s; }
+    button { cursor: pointer; font-family: 'DM Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+    .num-input { border-radius: 8px; font-family: 'DM Mono', monospace; font-size: 20px; padding: 10px 14px; width: 110px; text-align: right; outline: none; border-width: 1.5px; border-style: solid; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; display: flex; align-items: flex-end; justify-content: center; }
+    .sheet { width: 100%; max-width: 480px; border-radius: 20px 20px 0 0; padding: 24px 24px 40px; max-height: 85vh; overflow-y: auto; }
+    .milestone-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    @keyframes fadeIn { from { opacity:0; transform: translateY(16px); } to { opacity:1; transform: translateY(0); } }
+    .milestone-card { animation: fadeIn 0.3s ease; }
+    svg text { font-family: 'DM Mono', monospace; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+const { useState, useEffect, useRef, useMemo } = React;
+const e = React.createElement;
+
+const TAPER = [
+  {from:25,to:22,suggestedWater:25},{from:22,to:19,suggestedWater:25},
+  {from:19,to:17,suggestedWater:50},{from:17,to:15,suggestedWater:50},
+  {from:15,to:13,suggestedWater:50},{from:13,to:12,suggestedWater:75},
+  {from:12,to:11,suggestedWater:75},{from:11,to:9.6,suggestedWater:50},
+  {from:9.6,to:8.6,suggestedWater:75},{from:8.6,to:7.7,suggestedWater:100},
+  {from:7.7,to:7,suggestedWater:100},{from:7,to:6.3,suggestedWater:100},
+  {from:6.3,to:5.6,suggestedWater:100},{from:5.6,to:5,suggestedWater:125},
+  {from:5,to:4.4,suggestedWater:125},{from:4.4,to:4,suggestedWater:175},
+  {from:4,to:3.6,suggestedWater:175},{from:3.6,to:3.2,suggestedWater:175},
+  {from:3.2,to:2.8,suggestedWater:175},{from:2.8,to:2.4,suggestedWater:175},
+  {from:2.4,to:2.1,suggestedWater:250},{from:2.1,to:1.7,suggestedWater:175},
+  {from:1.7,to:1.4,suggestedWater:225},{from:1.4,to:1.2,suggestedWater:350},
+  {from:1.2,to:0.9,suggestedWater:250},{from:0.9,to:0.65,suggestedWater:275},
+  {from:0.65,to:0.45,suggestedWater:350},{from:0.45,to:0.2,suggestedWater:275},
+  {from:0.2,to:0,suggestedWater:350},
+];
+const DAYS = 28;
+const KEY  = 'citalopram_v4';
+
+// ── Messages ────────────────────────────────────────────────────────────────
+const MESSAGES = {
+  informativ: [
+    (p,d) => `Fase ${p} fuldført på ${d} dage. Din dagsdosis er nu ${TAPER[p]?.from ?? 0} mg — en reduktion på ${(25 - (TAPER[p]?.from ?? 0)).toFixed(1)} mg siden start.`,
+    (p,d) => `${d} dage gennemført. Nervesystemet har tilpasset sig endnu en reduktion. Det sker ikke hurtigt — men det sker.`,
+    (_,d) => `Hver fase er ${DAYS} dage. Du har nu lagt ${d} bag dig. Det er mere end de fleste tror de kan.`,
+    (p) => `Du er nu på ${TAPER[p]?.from ?? 0} mg. Sertralins halveringstid er ca. 26 timer — din krop har haft god tid til at finde fodfæste.`,
+  ],
+  varm: [
+    () => `Det tog mod at starte. Det tager mere at fortsætte. Du er her stadig.`,
+    (p,d) => `${d} dage. Fase for fase. Du gør det på den rigtige måde — langsomt og med omhu for dig selv.`,
+    () => `Mange stopper med at forsøge. Du er ikke en af dem.`,
+    () => `Der er ingen forkert hastighed her. Du bestemmer tempoet — og det er præcis som det skal være.`,
+    () => `Kroppen husker hvert skridt. Også dem der var svære.`,
+  ],
+  videnskabelig: [
+    () => `Ved gradvis nedtrapning er tilbagefaldsrisikoen markant lavere end ved hurtig ophør. Du gør det rigtigt.`,
+    (p) => `Under ${TAPER[p]?.from ?? 20} mg begynder serotonintransporterbindingen at normaliseres. Drømme kan blive mere levende — det er et godt tegn.`,
+    () => `Hyperbolsk nedtrapning — det du følger — sikrer at hver reduktion svarer til nogenlunde samme neurobiologiske belastning. Det er videnskaben bag din metode.`,
+    () => `Langsom nedtrapning giver hypothalamus og amygdala tid til at rekalibrere. Mild forbigående uro er forventet og forbigående.`,
+    () => `Sertralin virker primært via serotonintransportere. Med langsommere nedtrapning kan hjernen gradvis opregulere sine egne receptorer frem for at kompensere akut.`,
+  ],
+  fremadskuende: [
+    () => `Mange beskriver øget emotionel nuance i månederne efter endt nedtrapning. Ikke bare glæde — men hele paletten.`,
+    () => `Seksuel funktion og søvnkvalitet normaliseres typisk gradvist. Det kan tage tid — men retningen er klar.`,
+    () => `Den stolthed der venter på den anden side af dette — den kan ingen tage fra dig.`,
+    () => `Om et år ser du tilbage på dette som noget du faktisk gjorde. Ikke noget du overvejede.`,
+    () => `Tilliden til egne ressourcer — den bygges op nu, en fase ad gangen.`,
+  ],
+};
+
+// ── Milestones ──────────────────────────────────────────────────────────────
+function checkMilestones(phase, checkedAll, prevPhase) {
+  const totalDone = Object.values(checkedAll).reduce((s,d) => s + Object.values(d).filter(Boolean).length, 0);
+  const currentMg = TAPER[phase]?.from ?? 0;
+  const milestones = [];
+
+  if (totalDone === 1) milestones.push({ icon:'🌱', title:'Første dag afkrydset', sub:'Begyndelsen er den sværeste del.' });
+  if (totalDone === 7 && phase === 0) milestones.push({ icon:'🗓️', title:'7 dage i træk', sub:'En hel uge. Rutinen er ved at sætte sig.' });
+  if (phase > prevPhase && phase === 1) milestones.push({ icon:'✅', title:'Første fase fuldført', sub:'Du har bevist at du kan. Nu gentager du det.' });
+  if (currentMg < 20 && TAPER[prevPhase]?.from >= 20) milestones.push({ icon:'📉', title:'Under 20 mg', sub:'Et mærkbart skridt nedad på kurven.' });
+  if (currentMg < 15 && TAPER[prevPhase]?.from >= 15) milestones.push({ icon:'📉', title:'Under 15 mg', sub:'Mere end halvvejs mod 10 mg.' });
+  if (currentMg < 10 && TAPER[prevPhase]?.from >= 10) milestones.push({ icon:'🎯', title:'Under 10 mg', sub:'Lavdosisterritorium. Det mærker kroppen.' });
+  if (currentMg <= 12.5 && TAPER[prevPhase]?.from > 12.5) milestones.push({ icon:'🌗', title:'Halvvejs', sub:'25 mg til 0 mg — du er midt i det.' });
+  if (currentMg < 5 && TAPER[prevPhase]?.from >= 5) milestones.push({ icon:'🌟', title:'Under 5 mg', sub:'Slutspurten begynder. Du er tæt på.' });
+  if (currentMg < 1 && TAPER[prevPhase]?.from >= 1) milestones.push({ icon:'✨', title:'Under 1 mg', sub:'Mikrodoser. Næsten dér.' });
+  if (phase >= TAPER.length && prevPhase < TAPER.length) milestones.push({ icon:'🏁', title:'0 mg — Fuldført!', sub:'Du gjorde det. Det her er en stor ting.' });
+
+  return milestones;
+}
+
+// ── Lookback messages ────────────────────────────────────────────────────────
+const LOOKBACKS = [
+  (days, mgFrom, mgNow) => `Du har nu taget din medicin bevidst og præcist i ${days} dage. Det er ikke en lille ting.`,
+  (days, mgFrom, mgNow) => `For ${days} dage siden var du på ${mgFrom} mg. I dag er du på ${mgNow} mg. Det er ${(mgFrom-mgNow).toFixed(1)} mg færre — opnået tålmodigt.`,
+  (days) => `Mange stopper med at forsøge efter første tilbageslag. Du har holdt fast i ${days} dage.`,
+  (days) => `${days} dage i forløbet. Kroppen tilpasser sig langsommere end vi ønsker — men den tilpasser sig.`,
+  (days, mgFrom, mgNow) => `Fra ${mgFrom} mg til ${mgNow} mg på ${days} dage. Langsomt er præcist, og præcist er godt.`,
+];
+
+// ── Themes ───────────────────────────────────────────────────────────────────
+const THEMES = {
+  light:  { name:'Lys grøn',  emoji:'🌿', bg:'#f0f7f0', headerBg:'#ffffff', cardBg:'#ffffff', cardBorder:'#c8e0c8', rowToday:'#f0faf0', rowChecked:'#f7fbf7', subBg:'#f7fbf7', subBorder:'#e8f5e8', divider:'#d1e8d1', text:'#1a2e1a', textMuted:'#4b7a5a', textSub:'#6aaa6a', textFaint:'#a3c9a3', accent:'#16a34a', accentDark:'#14532d', accentLight:'#4ade80', progressBg:'#e8f5e8', inputBg:'#ffffff', inputBorder:'#a3c9a3', tabBg:'#e8f5e8', tabBorder:'#c8e0c8', tabActive:'#16a34a', tabActiveText:'#ffffff', dotDone:'#4ade80', dotInactive:'#c8e0c8', dotBorder:'#a3c9a3', chartLine:'#16a34a', chartFuture:'#a3c9a3', chartDot:'#14532d' },
+  pink:   { name:'Pink', emoji:'🌸', bg:'#fdf2f8', headerBg:'#ffffff', cardBg:'#ffffff', cardBorder:'#f0abda', rowToday:'#fdf2f8', rowChecked:'#fef6fb', subBg:'#fef6fb', subBorder:'#fce7f3', divider:'#fbcfe8', text:'#500724', textMuted:'#9d174d', textSub:'#db2777', textFaint:'#f9a8d4', accent:'#ec4899', accentDark:'#9d174d', accentLight:'#f472b6', progressBg:'#fce7f3', inputBg:'#ffffff', inputBorder:'#f9a8d4', tabBg:'#fce7f3', tabBorder:'#f0abda', tabActive:'#ec4899', tabActiveText:'#ffffff', dotDone:'#f472b6', dotInactive:'#fce7f3', dotBorder:'#f9a8d4', chartLine:'#ec4899', chartFuture:'#f9a8d4', chartDot:'#9d174d' },
+  blue:   { name:'Blå',       emoji:'🌊', bg:'#eff6ff', headerBg:'#ffffff', cardBg:'#ffffff', cardBorder:'#bfdbfe', rowToday:'#eff6ff', rowChecked:'#f8faff', subBg:'#f8faff', subBorder:'#dbeafe', divider:'#dbeafe', text:'#1e3a5f', textMuted:'#3b6fa0', textSub:'#60a5fa', textFaint:'#93c5fd', accent:'#2563eb', accentDark:'#1e40af', accentLight:'#60a5fa', progressBg:'#dbeafe', inputBg:'#ffffff', inputBorder:'#93c5fd', tabBg:'#dbeafe', tabBorder:'#bfdbfe', tabActive:'#2563eb', tabActiveText:'#ffffff', dotDone:'#60a5fa', dotInactive:'#bfdbfe', dotBorder:'#93c5fd', chartLine:'#2563eb', chartFuture:'#93c5fd', chartDot:'#1e40af' },
+  warm:   { name:'Varm',      emoji:'🌅', bg:'#fff7ed', headerBg:'#ffffff', cardBg:'#ffffff', cardBorder:'#fed7aa', rowToday:'#fff7ed', rowChecked:'#fffbf7', subBg:'#fffbf7', subBorder:'#ffedd5', divider:'#fed7aa', text:'#431407', textMuted:'#9a3412', textSub:'#c2410c', textFaint:'#fb923c', accent:'#ea580c', accentDark:'#9a3412', accentLight:'#fb923c', progressBg:'#ffedd5', inputBg:'#ffffff', inputBorder:'#fdba74', tabBg:'#ffedd5', tabBorder:'#fed7aa', tabActive:'#ea580c', tabActiveText:'#ffffff', dotDone:'#fb923c', dotInactive:'#fed7aa', dotBorder:'#fdba74', chartLine:'#ea580c', chartFuture:'#fdba74', chartDot:'#9a3412' },
+  purple: { name:'Lilla',     emoji:'💜', bg:'#faf5ff', headerBg:'#ffffff', cardBg:'#ffffff', cardBorder:'#ddd6fe', rowToday:'#faf5ff', rowChecked:'#fdf8ff', subBg:'#fdf8ff', subBorder:'#ede9fe', divider:'#ddd6fe', text:'#2e1065', textMuted:'#6d28d9', textSub:'#8b5cf6', textFaint:'#c4b5fd', accent:'#7c3aed', accentDark:'#5b21b6', accentLight:'#a78bfa', progressBg:'#ede9fe', inputBg:'#ffffff', inputBorder:'#c4b5fd', tabBg:'#ede9fe', tabBorder:'#ddd6fe', tabActive:'#7c3aed', tabActiveText:'#ffffff', dotDone:'#a78bfa', dotInactive:'#ddd6fe', dotBorder:'#c4b5fd', chartLine:'#7c3aed', chartFuture:'#c4b5fd', chartDot:'#5b21b6' },
+};
+
+function getDoses(from, to) {
+  return Array.from({length:DAYS}, (_,i) => {
+    const d = from - ((from-to)/(DAYS-1))*i;
+    return Math.round(d*100)/100;
+  });
+}
+
+function calc(tabletMg, waterMl, targetDose) {
+  if (!tabletMg||!waterMl||tabletMg<=0||waterMl<=0) return null;
+  const conc = tabletMg/waterMl;
+  const discard = Math.round(((tabletMg-targetDose)/conc)*10)/10;
+  const drink = Math.round((waterMl-discard)*10)/10;
+  const actual = Math.round(drink*conc*100)/100;
+  return { conc:Math.round(conc*1000)/1000, discard, drink, actual, diff:Math.abs(actual-targetDose) };
+}
+
+function load() {
+  try { const s=localStorage.getItem(KEY); if(s) return JSON.parse(s); } catch(err) {}
+  return { phase:0, checked:{}, themeKey:'light', tones:{informativ:true,varm:true,videnskabelig:true,fremadskuende:true}, startDate:'' };
+}
+
+function pickRandom(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
+
+function fmtMonth(date) {
+  const mm = String(date.getMonth()+1).padStart(2,'0');
+  const yy = String(date.getFullYear()).slice(-2);
+  return `${mm}-${yy}`;
+}
+
+// ── Curve component ──────────────────────────────────────────────────────────
+function TaperCurve({ checked, startDate, T }) {
+  const W = 440, H = 200, PL = 40, PR = 20, PT = 16, PB = 32;
+  const iW = W-PL-PR, iH = H-PT-PB;
+
+  const totalDays = TAPER.length * DAYS;
+  const maxMg = 25;
+
+  function dayToX(day) { return PL + (day/totalDays)*iW; }
+  function mgToY(mg)   { return PT + iH - (mg/maxMg)*iH; }
+
+  // Build ALL daily points across all phases
+  // Each phase has DAYS daily dose values from getDoses(from, to)
+  const allDailyPts = [];
+  TAPER.forEach((ph, pi) => {
+    const doses = getDoses(ph.from, ph.to);
+    doses.forEach((mg, di) => {
+      allDailyPts.push({ day: pi*DAYS + di, mg });
+    });
+  });
+  // Add final 0mg endpoint
+  allDailyPts.push({ day: totalDays, mg: 0 });
+
+  // Count total checked days to find current position
+  const totalDone = Object.values(checked).reduce((s,d)=>s+Object.values(d).filter(Boolean).length,0);
+
+  // Build past and future points - share exactly one point at junction
+  const pastPts = allDailyPts.filter(p => p.day <= totalDone);
+  if (pastPts.length === 0) pastPts.push(allDailyPts[0]);
+  const lastPastDay = pastPts[pastPts.length-1].day;
+  const futurePts = allDailyPts.filter(p => p.day >= lastPastDay);
+
+  // Convert to SVG coords
+  const toPt = p => ({ x: dayToX(p.day), y: mgToY(p.mg) });
+  const toPath = pts => pts.map((p,i)=>`${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+  const pastPoints   = pastPts.map(toPt);
+  const futurePoints = futurePts.map(toPt);
+
+  // Month labels on x-axis - skip to avoid overlap
+  const monthLabels = [];
+  if (startDate) {
+    const s = new Date(startDate);
+    const allMonths = [];
+    let d = new Date(s); d.setDate(1); d.setMonth(d.getMonth()+1);
+    let safety = 0;
+    while (safety++ < 40) {
+      const dayOffset = Math.round((d-s)/(1000*60*60*24));
+      if (dayOffset > totalDays) break;
+      allMonths.push({ x: dayToX(dayOffset), label: fmtMonth(d) });
+      d.setMonth(d.getMonth()+1);
+    }
+    const step = Math.max(1, Math.ceil(allMonths.length / 8));
+    allMonths.forEach((m,i) => { if (i % step === 0) monthLabels.push(m); });
+  }
+
+  // Milestone mg lines
+  const mgLines = [20,15,10,5,1];
+
+  return e('svg', { viewBox:`0 0 ${W} ${H}`, width:'100%', style:{display:'block'} },
+    // Grid lines
+    ...mgLines.map(mg => {
+      const y = mgToY(mg);
+      return e('g', { key:mg },
+        e('line', { x1:PL, y1:y, x2:W-PR, y2:y, stroke:T.subBorder, strokeWidth:1, strokeDasharray:'3,3' }),
+        e('text', { x:PL-4, y:y+4, textAnchor:'end', fontSize:9, fill:T.textFaint }, mg)
+      );
+    }),
+    // Axes labels
+    e('text', { x:PL-4, y:mgToY(25)+4, textAnchor:'end', fontSize:9, fill:T.textFaint }, '25'),
+    e('text', { x:PL-4, y:mgToY(0)+4, textAnchor:'end', fontSize:9, fill:T.textFaint }, '0'),
+
+    // Month labels
+    ...monthLabels.map(({x,label},i) =>
+      e('g', { key:i },
+        e('line', { x1:x, y1:PT, x2:x, y2:H-PB+4, stroke:T.subBorder, strokeWidth:1 }),
+        e('text', { x, y:H-PB+13, textAnchor:'middle', fontSize:8, fill:T.textFaint }, label)
+      )
+    ),
+
+    // Future path (dashed)
+    futurePoints.length > 1 && e('path', { d:toPath(futurePoints), fill:'none', stroke:T.chartFuture, strokeWidth:2, strokeDasharray:'5,4' }),
+    // Past path (solid)
+    pastPoints.length > 1 && e('path', { d:toPath(pastPoints), fill:'none', stroke:T.chartLine, strokeWidth:2.5 }),
+
+
+
+    // Axes
+    e('line', { x1:PL, y1:PT, x2:PL, y2:H-PB, stroke:T.textFaint, strokeWidth:1 }),
+    e('line', { x1:PL, y1:H-PB, x2:W-PR, y2:H-PB, stroke:T.textFaint, strokeWidth:1 }),
+  );
+}
+
+
+// ── Confetti ──────────────────────────────────────────────────────────────────
+function useConfetti() {
+  const canvasRef = useRef(null);
+  const activeRef = useRef(false);
+
+  function launch() {
+    const canvas = canvasRef.current;
+    if (!canvas || activeRef.current) return;
+    activeRef.current = true;
+    canvas.style.display = 'block';
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext('2d');
+    const colors = ['#16a34a','#60a5fa','#f472b6','#fbbf24','#a78bfa','#34d399','#f87171','#38bdf8'];
+    const pieces = Array.from({length:120}, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * -canvas.height * 0.5 - 10,
+      r: Math.random() * 7 + 4,
+      color: colors[Math.floor(Math.random()*colors.length)],
+      vx: (Math.random()-0.5) * 3,
+      vy: Math.random() * 4 + 2,
+      angle: Math.random()*Math.PI*2,
+      va: (Math.random()-0.5) * 0.2,
+      shape: Math.random() > 0.5 ? 'rect' : 'circle',
+      w: Math.random() * 12 + 6,
+      h: Math.random() * 6 + 4,
+    }));
+    let frame;
+    const startTime = Date.now();
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      const elapsed = Date.now() - startTime;
+      const fade = Math.max(0, 1 - Math.max(0,(elapsed-2200)/800));
+      pieces.forEach(p => {
+        p.x += p.vx; p.y += p.vy + 0.05; p.angle += p.va;
+        ctx.save();
+        ctx.globalAlpha = fade * (p.y < canvas.height ? 1 : 0);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.angle);
+        ctx.fillStyle = p.color;
+        if (p.shape === 'circle') {
+          ctx.beginPath(); ctx.arc(0,0,p.r,0,Math.PI*2); ctx.fill();
+        } else {
+          ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+        }
+        ctx.restore();
+      });
+      if (elapsed < 3000) { frame = requestAnimationFrame(draw); }
+      else { canvas.style.display='none'; activeRef.current=false; }
+    }
+    draw();
+    return () => { cancelAnimationFrame(frame); canvas.style.display='none'; activeRef.current=false; };
+  }
+  const ConfettiCanvas = e('canvas', { ref:canvasRef, style:{position:'fixed',inset:0,zIndex:999,pointerEvents:'none',display:'none'} });
+  return { launch, ConfettiCanvas };
+}
+
+// ── App ──────────────────────────────────────────────────────────────────────
+function App() {
+  const init = load();
+  const [phase,        setPhaseRaw]  = useState(init.phase    || 0);
+  const [checked,      setChecked]   = useState(init.checked  || {});
+  const [tab,          setTab]       = useState('today');
+  const [waterMl,      setWaterMl]   = useState('');
+  const [tabletMg,     setTabletMg]  = useState('25');
+  const [tabletLocked, setTabletLocked] = useState(true);
+  const [themeKey,     setThemeKey]  = useState(init.themeKey || 'light');
+  const [tones,        setTones]     = useState(init.tones || {informativ:true,varm:true,videnskabelig:true,fremadskuende:true});
+  const [startDate,    setStartDate] = useState(init.startDate || '');
+  const [showSettings, setShowSettings] = useState(false);
+  const [milestone,    setMilestone] = useState(null);   // {icon,title,sub,msg,lookback}
+  const prevPhaseRef = useRef(phase);
+
+  const { launch: launchConfetti, ConfettiCanvas } = useConfetti();
+  const T = THEMES[themeKey];
+  const mono = { fontFamily:"'DM Mono', monospace" };
+
+  const setPhase = (p) => { prevPhaseRef.current = phase; setPhaseRaw(p); };
+
+  useEffect(() => { setWaterMl(String(TAPER[phase]?.suggestedWater || 25)); }, [phase]);
+  useEffect(() => { document.body.style.background=T.bg; document.body.style.color=T.text; }, [themeKey]);
+  useEffect(() => {
+    try { localStorage.setItem(KEY, JSON.stringify({phase,checked,themeKey,tones,startDate})); } catch(err) {}
+  }, [phase,checked,themeKey,tones,startDate]);
+
+  // Show milestone/lookback on every phase change
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    if (phase === prev) return;
+    const activeTones = Object.keys(tones).filter(k=>tones[k]);
+    const tone = activeTones.length > 0 ? pickRandom(activeTones) : 'varm';
+    const msgFn = pickRandom(MESSAGES[tone]);
+    const totalDone = Object.values(checked).reduce((s,d)=>s+Object.values(d).filter(Boolean).length,0);
+    const lookbackFn = pickRandom(LOOKBACKS);
+    const mgFrom = TAPER[prev]?.from ?? 25;
+    const mgNow  = TAPER[phase]?.from ?? 0;
+    // Check for special milestone, otherwise use generic phase complete
+    const ms = checkMilestones(phase, checked, prev);
+    const base = ms.length > 0 ? ms[0] : {
+      icon: '✅',
+      title: `Fase ${prev+1} fuldført`,
+      sub: `Du er nu på ${mgNow} mg.`,
+    };
+    setMilestone({
+      ...base,
+      msg: msgFn(phase+1, totalDone),
+      lookback: lookbackFn(totalDone, mgFrom, mgNow),
+    });
+    launchConfetti();
+  }, [phase]);
+
+  const interval       = TAPER[phase] || TAPER[TAPER.length-1];
+  const doses          = getDoses(interval.from, interval.to);
+  const totalPhases    = TAPER.length;
+  const checkedInPhase = Object.values(checked[phase]||{}).filter(Boolean).length;
+  const phaseComplete  = checkedInPhase === DAYS;
+  const todayIdx       = doses.findIndex((_,i)=>!checked[phase]?.[i]);
+  const todayDose      = todayIdx>=0 ? doses[todayIdx] : null;
+  const totalDone      = Object.values(checked).reduce((s,d)=>s+Object.values(d).filter(Boolean).length,0);
+  const overallPct     = Math.round((totalDone/(totalPhases*DAYS))*100);
+  const tMg = parseFloat(tabletMg)||25;
+  const wMl = parseFloat(waterMl);
+
+  const toggle = (day) => setChecked(prev=>({...prev,[phase]:{...(prev[phase]||{}),[day]:!(prev[phase]?.[day])}}));
+
+  function Divider() { return e('div',{style:{height:1,background:T.divider}}); }
+
+  function VerifyBox({targetDose,tabletMg,waterMl}) {
+    const r=calc(tabletMg,waterMl,targetDose);
+    if(!r) return null;
+    const ok=r.diff<0.1, warn=r.diff<0.3;
+    const col=ok?'#166534':warn?'#92400e':'#991b1b';
+    const bg=ok?'#dcfce7':warn?'#fef3c7':'#fee2e2';
+    const brd=ok?'#86efac':warn?'#fcd34d':'#fca5a5';
+    return e('div',{style:{background:bg,border:`1.5px solid ${brd}`,borderRadius:10,padding:'12px 16px',marginTop:10}},
+      e('div',{style:{display:'flex',gap:10,alignItems:'flex-start'}},
+        e('span',{style:{...mono,fontSize:16,color:col,flexShrink:0}},ok?'✓':warn?'⚠':'✗'),
+        e('div',{style:{flex:1}},
+          e('p',{style:{fontSize:12,color:col,marginBottom:10,fontWeight:500}},
+            ok?`Koncentration ${r.conc} mg/ml — dosis OK`
+            :warn?`Koncentration ${r.conc} mg/ml — afvigelse ${r.diff.toFixed(2)} mg (afrunding)`
+            :`Koncentration ${r.conc} mg/ml — afvigelse ${r.diff.toFixed(2)} mg, tjek dine tal`
+          ),
+          e('div',{style:{display:'flex',gap:20}},
+            ...[ ['SMID UD',`${r.discard.toFixed(1)} ml`],['DRIK',`${r.drink.toFixed(1)} ml`],['DOSIS',`${r.actual.toFixed(2)} mg`] ]
+              .map(([label,val])=>e('div',{key:label},
+                e('p',{style:{...mono,fontSize:10,color:col,opacity:0.7,marginBottom:3}},label),
+                e('p',{style:{...mono,fontSize:22,color:col,fontWeight:700}},val)
+              ))
+          )
+        )
+      )
+    );
+  }
+
+  // MILESTONE OVERLAY
+  const MilestoneOverlay = milestone && e('div',{className:'milestone-overlay',onClick:()=>setMilestone(null)},
+    e('div',{className:'milestone-card',style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:20,padding:28,maxWidth:400,width:'100%'},onClick:ev=>ev.stopPropagation()},
+      e('div',{style:{textAlign:'center',marginBottom:20}},
+        e('p',{style:{fontSize:48,marginBottom:10}},milestone.icon),
+        e('h2',{style:{fontFamily:"'Playfair Display', serif",fontSize:22,fontWeight:700,color:T.accentDark,marginBottom:6}},milestone.title),
+        e('p',{style:{fontSize:14,color:T.textMuted}},milestone.sub)
+      ),
+      e('div',{style:{background:T.subBg,border:`1px solid ${T.subBorder}`,borderRadius:12,padding:'14px 16px',marginBottom:12}},
+        e('p',{style:{fontSize:14,color:T.text,lineHeight:1.6}},milestone.msg)
+      ),
+      e('div',{style:{background:T.progressBg,borderRadius:10,padding:'12px 14px',marginBottom:20}},
+        e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'Tilbagekig'),
+        e('p',{style:{fontSize:13,color:T.textMuted,lineHeight:1.5}},milestone.lookback)
+      ),
+      e('button',{onClick:()=>setMilestone(null),style:{width:'100%',padding:'12px',background:T.accent,color:'#fff',border:'none',borderRadius:10,fontSize:14,fontWeight:600,...mono}},
+        'Fortsæt →')
+    )
+  );
+
+  // SETTINGS SHEET
+  const SettingsSheet = showSettings && e('div',{className:'overlay',onClick:()=>setShowSettings(false)},
+    e('div',{className:'sheet',style:{background:T.cardBg},onClick:ev=>ev.stopPropagation()},
+      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}},
+        e('h2',{style:{fontSize:18,fontWeight:700,color:T.text}},'Indstillinger'),
+        e('button',{onClick:()=>setShowSettings(false),style:{background:T.progressBg,border:'none',borderRadius:8,width:32,height:32,fontSize:18,color:T.textMuted,display:'flex',alignItems:'center',justifyContent:'center'}},'×')
+      ),
+
+      // Start date
+      e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:8}},'Startdato'),
+      e('div',{style:{marginBottom:20}},
+        e('input',{type:'date',value:startDate,onChange:ev=>setStartDate(ev.target.value),
+          style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1.5px solid ${T.cardBorder}`,
+            background:T.inputBg,color:T.text,fontSize:14,fontFamily:'DM Sans, sans-serif',outline:'none'}})
+      ),
+
+      // Tones
+      e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:8}},'Besked-tone'),
+      e('div',{style:{display:'flex',flexDirection:'column',gap:8,marginBottom:20}},
+        ...[ ['informativ','Informativ','Fakta og tal'], ['varm','Varm','Personlig og anerkendende'], ['videnskabelig','Videnskabelig','Hvad sker der i kroppen'], ['fremadskuende','Fremadskuende','Hvad venter forude'] ]
+          .map(([key,label,sub])=>
+            e('button',{key,onClick:()=>setTones(t=>({...t,[key]:!t[key]})),
+              style:{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderRadius:10,
+                border:`1.5px solid ${tones[key]?T.accent:T.cardBorder}`,
+                background:tones[key]?T.progressBg:T.subBg,cursor:'pointer',textAlign:'left'}},
+              e('div',{style:{width:20,height:20,borderRadius:5,border:`1.5px solid ${tones[key]?T.accent:T.dotBorder}`,
+                background:tones[key]?T.accent:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
+                tones[key]&&e('span',{style:{color:'#fff',fontSize:12,lineHeight:1}},'✓')
+              ),
+              e('div',null,
+                e('p',{style:{fontSize:14,color:T.text,fontWeight:tones[key]?600:400}},label),
+                e('p',{style:{fontSize:11,color:T.textMuted}},sub)
+              )
+            )
+          )
+      ),
+
+      // Themes
+      e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:8}},'Farvetema'),
+      e('div',{style:{display:'flex',flexDirection:'column',gap:8}},
+        ...Object.entries(THEMES).map(([key,theme])=>
+          e('button',{key,onClick:()=>setThemeKey(key),
+            style:{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderRadius:10,
+              border:`${themeKey===key?'2px':'1.5px'} solid ${themeKey===key?T.accent:T.cardBorder}`,
+              background:themeKey===key?T.progressBg:T.subBg,cursor:'pointer',textAlign:'left'}},
+            e('span',{style:{fontSize:22}},theme.emoji),
+            e('span',{style:{fontSize:14,color:T.text,fontWeight:themeKey===key?600:400}},theme.name),
+            themeKey===key&&e('span',{style:{...mono,fontSize:11,color:T.accent,marginLeft:'auto'}},'✓ Valgt')
+          )
+        )
+      )
+    )
+  );
+
+  // HEADER
+  const Header = e('div',{style:{padding:'28px 24px 20px',borderBottom:`1.5px solid ${T.cardBorder}`,background:T.headerBg}},
+    e('div',{style:{maxWidth:480,margin:'0 auto'}},
+      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}},
+        e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.15em',textTransform:'uppercase'}},'Sertralin nedtrapning'),
+        e('button',{onClick:()=>setShowSettings(true),style:{background:T.progressBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:8,padding:'5px 10px',fontSize:16,color:T.textMuted,display:'flex',alignItems:'center',gap:4}},
+          '⚙️',e('span',{style:{...mono,fontSize:9,color:T.textSub}},'v2.1'))
+      ),
+      e('h1',{style:{fontFamily:"'Playfair Display', serif",fontSize:28,fontWeight:700,color:T.accentDark,marginBottom:16}},`${interval.from} → ${interval.to} mg`),
+      e('div',{style:{marginBottom:14}},
+        e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:6,fontSize:12,color:T.textMuted,...mono}},
+          e('span',null,'Samlet fremgang'),
+          e('span',null,`${overallPct}% · dag ${totalDone}/${totalPhases*DAYS}`)
+        ),
+        e('div',{style:{height:6,background:T.progressBg,borderRadius:3,overflow:'hidden'}},
+          e('div',{style:{width:`${overallPct}%`,height:'100%',background:T.accent,borderRadius:3,transition:'width 0.5s'}})
+        )
+      ),
+      e('div',{style:{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}},
+        ...TAPER.map((_,i)=>{
+          const done=Object.values(checked[i]||{}).filter(Boolean).length===DAYS;
+          const active=i===phase;
+          return e('div',{key:i,onClick:()=>{setPhase(i);setTab('today');},
+            style:{width:active?18:6,height:6,borderRadius:3,cursor:'pointer',transition:'all 0.2s',
+              background:active?T.accent:done?T.dotDone:T.dotInactive,
+              border:active||done?'none':`1.5px solid ${T.dotBorder}`}});
+        }),
+        e('span',{style:{...mono,fontSize:10,color:T.textSub,marginLeft:4}},`Fase ${phase+1}/${totalPhases}`)
+      )
+    )
+  );
+
+  // TABS
+  const Tabs = e('div',{style:{maxWidth:480,margin:'14px auto 0',padding:'0 24px'}},
+    e('div',{style:{display:'flex',gap:3,background:T.tabBg,borderRadius:10,padding:3,border:`1.5px solid ${T.tabBorder}`}},
+      ...[['today','I dag'],['list','Alle dage'],['overview','Faser'],['curve','Kurve']].map(([t,label])=>
+        e('button',{key:t,onClick:()=>setTab(t),
+          style:{flex:1,padding:'9px 0',borderRadius:7,fontSize:11,border:'none',...mono,
+            color:tab===t?T.tabActiveText:T.textMuted,
+            background:tab===t?T.tabActive:'none',fontWeight:tab===t?600:400}},label)
+      )
+    )
+  );
+
+  // TODAY
+  const TodayTab = phaseComplete
+    ? e('div',{style:{background:'#dcfce7',border:'1.5px solid #86efac',borderRadius:12,padding:20,textAlign:'center'}},
+        e('p',{style:{fontSize:28,marginBottom:8}},'🎉'),
+        e('p',{style:{color:'#166534',fontWeight:600,fontSize:16,marginBottom:12}},`Fase ${phase+1} fuldført!`),
+        phase<totalPhases-1&&e('button',{onClick:()=>setPhase(phase+1),
+          style:{padding:'10px 24px',background:T.accent,color:'#fff',border:'none',borderRadius:8,...mono,fontSize:13,fontWeight:600}},
+          `Start fase ${phase+2} →`)
+      )
+    : e('div',null,
+        // Dose card
+        e('div',{style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:12,padding:'18px 20px',marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',boxShadow:'0 1px 4px rgba(0,0,0,0.06)'}},
+          e('div',null,
+            e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:6}},`Dag ${todayIdx+1} af 28`),
+            e('div',{style:{display:'flex',alignItems:'baseline',gap:6}},
+              e('span',{style:{fontFamily:"'Playfair Display', serif",fontSize:52,fontWeight:700,color:T.accentDark,lineHeight:1}},todayDose?.toFixed(2)),
+              e('span',{style:{...mono,fontSize:16,color:T.accent}},'mg')
+            )
+          ),
+          e('button',{onClick:()=>toggle(todayIdx),
+            style:{width:56,height:56,borderRadius:14,
+              border:checked[phase]?.[todayIdx]?'none':`2px solid ${T.dotBorder}`,
+              background:checked[phase]?.[todayIdx]?T.accent:T.progressBg,
+              color:checked[phase]?.[todayIdx]?'#fff':T.textSub,
+              fontSize:24,display:'flex',alignItems:'center',justifyContent:'center'}},
+            checked[phase]?.[todayIdx]?'✓':'○')
+        ),
+
+        // Stamopløsning card
+        e('div',{style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:12,overflow:'hidden',marginBottom:4,boxShadow:'0 1px 4px rgba(0,0,0,0.06)'}},
+          e('div',{style:{padding:'10px 16px',borderBottom:`1px solid ${T.subBorder}`,background:T.subBg}},
+            e('span',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.12em',textTransform:'uppercase'}},'Stamopløsning')
+          ),
+          e('div',{style:{padding:'14px 16px',display:'flex',flexDirection:'column',gap:12}},
+            // Tablet with lock
+            e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+              e('div',null,
+                e('p',{style:{fontSize:14,color:T.text}},'Tablet (mg)'),
+                
+              ),
+              e('div',{style:{display:'flex',alignItems:'center',gap:6}},
+                tabletLocked
+                  ? e('div',{style:{...mono,fontSize:20,fontWeight:600,color:T.textMuted,background:T.progressBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:8,padding:'10px 14px',minWidth:80,textAlign:'right'}},`${tabletMg} mg`)
+                  : e('input',{className:'num-input',type:'number',step:'0.5',min:'0.5',value:tabletMg,
+                      style:{background:T.inputBg,borderColor:'#f59e0b',color:T.accentDark,width:90},
+                      onChange:ev=>setTabletMg(ev.target.value)}),
+                e('button',{onClick:()=>setTabletLocked(l=>!l),
+                  style:{width:36,height:36,borderRadius:8,border:`1.5px solid ${tabletLocked?T.cardBorder:'#f59e0b'}`,
+                    background:tabletLocked?T.progressBg:'#fef3c7',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
+                  tabletLocked?'🔒':'🔓')
+              )
+            ),
+            e(Divider),
+            // Water
+            e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+              e('div',null,
+                e('label',{style:{fontSize:14,color:T.text,display:'block'}},'Vand (ml)'),
+                e('p',{style:{...mono,fontSize:10,color:T.textSub,marginTop:2}},`Forslag: ${interval.suggestedWater} ml`)
+              ),
+              e('input',{className:'num-input',type:'number',step:'25',min:'0',value:waterMl,
+                style:{background:T.inputBg,borderColor:T.inputBorder,color:T.accentDark},
+                onChange:ev=>setWaterMl(ev.target.value)})
+            )
+          )
+        ),
+
+        todayDose&&e(VerifyBox,{targetDose:todayDose,tabletMg:tMg,waterMl:wMl}),
+
+        // Phase progress
+        e('div',{style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:10,padding:'12px 16px',marginTop:12}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:8,fontSize:12,color:T.textMuted,...mono}},
+            e('span',null,`Fase ${phase+1} fremgang`),
+            e('span',null,`${checkedInPhase}/${DAYS} dage`)
+          ),
+          e('div',{style:{height:6,background:T.progressBg,borderRadius:3,overflow:'hidden'}},
+            e('div',{style:{width:`${(checkedInPhase/DAYS)*100}%`,height:'100%',background:T.accent,borderRadius:3,transition:'width 0.4s'}})
+          )
+        )
+      );
+
+  // CURVE TAB
+  const CurveTab = e('div',null,
+    e('div',{style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:12,padding:'16px 16px 12px',marginBottom:12,boxShadow:'0 1px 4px rgba(0,0,0,0.06)'}},
+      e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
+        e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.12em',textTransform:'uppercase'}},'Nedtrapningskurve'),
+        e('p',{style:{...mono,fontSize:10,color:T.textFaint}},startDate?`Start: ${new Date(startDate).toLocaleDateString('da-DK',{day:'numeric',month:'short',year:'numeric'})}` : 'Sæt startdato i indstillinger')
+      ),
+      e(TaperCurve,{checked,startDate,T}),
+      e('div',{style:{display:'flex',gap:16,marginTop:8}},
+        e('div',{style:{display:'flex',alignItems:'center',gap:5}},
+          e('div',{style:{width:20,height:2.5,background:T.chartLine,borderRadius:2}}),
+          e('span',{style:{...mono,fontSize:9,color:T.textFaint}},'Gennemført')
+        ),
+        e('div',{style:{display:'flex',alignItems:'center',gap:5}},
+          e('div',{style:{width:20,height:2,borderTop:`2px dashed ${T.chartFuture}`,borderRadius:2}}),
+          e('span',{style:{...mono,fontSize:9,color:T.textFaint}},'Fremskrivning')
+        ),
+
+      )
+    ),
+    // Stats
+    e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+      ...[
+        ['Dage i alt',`${totalDone}`],
+        ['Nuværende dosis',`${interval.from} mg`],
+        ['Reduceret',`${(25-interval.from).toFixed(1)} mg`],
+        ['Tilbage',`${interval.from.toFixed(1)} mg`],
+      ].map(([label,val])=>
+        e('div',{key:label,style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:10,padding:'12px 14px'}},
+          e('p',{style:{...mono,fontSize:10,color:T.textSub,marginBottom:4}},label.toUpperCase()),
+          e('p',{style:{...mono,fontSize:20,fontWeight:700,color:T.accentDark}},val)
+        )
+      )
+    )
+  );
+
+  // LIST
+  const ListTab = e('div',null,
+    e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}},
+      e('button',{disabled:phase===0,onClick:()=>setPhase(p=>p-1),style:{color:T.textMuted,fontSize:22,padding:'4px 8px',background:'none',border:'none',opacity:phase===0?0.3:1}},'←'),
+      e('span',{style:{...mono,fontSize:11,color:T.textMuted}},`Fase ${phase+1}: ${interval.from} → ${interval.to} mg`),
+      e('button',{disabled:phase===totalPhases-1,onClick:()=>setPhase(p=>p+1),style:{color:T.textMuted,fontSize:22,padding:'4px 8px',background:'none',border:'none',opacity:phase===totalPhases-1?0.3:1}},'→')
+    ),
+    e('div',{style:{background:T.subBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:10,padding:'10px 14px',marginBottom:10}},
+      e('p',{style:{fontSize:12,color:T.textMuted}},
+        `Forslag: opløs `,e('strong',{style:{color:T.accentDark}},`${tMg} mg`),` tablet i `,
+        e('strong',{style:{color:T.accentDark}},`${interval.suggestedWater} ml`),' vand'
+      )
+    ),
+    e('div',{style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:12,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.06)'}},
+      e('div',{style:{display:'grid',gridTemplateColumns:'40px 1fr 72px 60px 28px',gap:6,padding:'8px 14px',borderBottom:`1.5px solid ${T.subBorder}`,background:T.subBg}},
+        ...['Dag','Dosis','Smid ud','Drik',''].map((h,i)=>
+          e('span',{key:i,style:{...mono,fontSize:10,color:T.textSub,textAlign:i>=2?'right':'left',fontWeight:600}},h)
+        )
+      ),
+      ...doses.map((dose,i)=>{
+        const isChecked=checked[phase]?.[i]||false;
+        const isToday=i===todayIdx&&!phaseComplete;
+        const r=calc(tMg,interval.suggestedWater,dose);
+        return e('div',{key:i,className:'row',onClick:()=>toggle(i),
+          style:{display:'grid',gridTemplateColumns:'40px 1fr 72px 60px 28px',gap:6,padding:'9px 14px',
+            borderBottom:i<DAYS-1?`1px solid ${T.subBorder}`:'none',
+            background:isToday?T.rowToday:isChecked?T.rowChecked:'transparent',
+            borderLeft:isToday?`3px solid ${T.accent}`:'3px solid transparent'}},
+          e('span',{style:{...mono,fontSize:11,color:isToday?T.accent:T.textSub,alignSelf:'center',fontWeight:isToday?700:400}},i+1),
+          e('span',{style:{...mono,fontSize:12,color:isChecked?T.textFaint:T.text,alignSelf:'center',textDecoration:isChecked?'line-through':'none'}},`${dose.toFixed(2)} mg`),
+          e('span',{style:{...mono,fontSize:12,color:T.accent,textAlign:'right',alignSelf:'center',fontWeight:600}},`${r?.discard.toFixed(1)||'-'} ml`),
+          e('span',{style:{...mono,fontSize:12,color:T.textMuted,textAlign:'right',alignSelf:'center'}},`${r?.drink.toFixed(1)||'-'} ml`),
+          e('div',{style:{width:22,height:22,borderRadius:6,border:isChecked?'none':`1.5px solid ${T.dotBorder}`,background:isChecked?T.accent:T.progressBg,color:isChecked?'#fff':T.textSub,fontSize:12,display:'flex',alignItems:'center',justifyContent:'center',justifySelf:'center',alignSelf:'center'}},
+            isChecked?'✓':'·')
+        );
+      })
+    )
+  );
+
+  // OVERVIEW
+  const OverviewTab = e('div',{style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:12,overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.06)'}},
+    ...TAPER.map((p,i)=>{
+      const done=Object.values(checked[i]||{}).filter(Boolean).length;
+      const pct=Math.round((done/DAYS)*100);
+      const active=i===phase, complete=pct===100;
+      return e('div',{key:i,className:'row',onClick:()=>{setPhase(i);setTab('today');},
+        style:{display:'flex',alignItems:'center',gap:10,padding:'11px 16px',
+          borderBottom:i<TAPER.length-1?`1px solid ${T.subBorder}`:'none',
+          background:active?T.rowToday:'transparent',
+          borderLeft:active?`3px solid ${T.accent}`:'3px solid transparent'}},
+        e('span',{style:{...mono,fontSize:10,color:active?T.accent:T.textSub,minWidth:18,fontWeight:active?700:400}},i+1),
+        e('div',{style:{flex:1}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:4,fontSize:13,color:complete?T.accent:active?T.accentDark:T.textMuted,fontWeight:active?600:400}},
+            e('span',null,`${p.from} → ${p.to} mg`),
+            e('div',{style:{display:'flex',alignItems:'center',gap:8}},
+              e('span',{style:{...mono,fontSize:9,color:T.textFaint}},`${p.suggestedWater}ml`),
+              e('span',{style:{...mono,fontSize:11}},complete?'✓':`${pct}%`)
+            )
+          ),
+          e('div',{style:{height:4,background:T.progressBg,borderRadius:2,overflow:'hidden'}},
+            e('div',{style:{width:`${pct}%`,height:'100%',background:complete?T.accentLight:T.accent,borderRadius:2}})
+          )
+        )
+      );
+    })
+  );
+
+  return e('div',{style:{background:T.bg,minHeight:'100vh'}},
+    ConfettiCanvas,
+    MilestoneOverlay,
+    SettingsSheet,
+    Header, Tabs,
+    e('div',{style:{maxWidth:480,margin:'14px auto 0',padding:'0 24px'}},
+      tab==='today'    && TodayTab,
+      tab==='list'     && ListTab,
+      tab==='curve'    && CurveTab,
+      tab==='overview' && OverviewTab
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(e(App));
+</script>
+</body>
+</html>
