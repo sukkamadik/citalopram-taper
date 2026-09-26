@@ -616,9 +616,9 @@ function App() {
     e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
       ...[
         ['Dage i alt',`${totalDone}`],
-        ['Nuværende dosis',`${interval.from} mg`],
-        ['Reduceret',`${(25-interval.from).toFixed(1)} mg`],
-        ['Tilbage',`${interval.from.toFixed(1)} mg`],
+        ['Nuværende dosis', todayDose != null ? `${todayDose.toFixed(2)} mg` : `${interval.to} mg`],
+        ['Reduceret', todayDose != null ? `${(25-todayDose).toFixed(2)} mg` : `${(25-interval.to).toFixed(2)} mg`],
+        ['Tilbage', todayDose != null ? `${todayDose.toFixed(2)} mg` : `${interval.to.toFixed(2)} mg`],
       ].map(([label,val])=>
         e('div',{key:label,style:{background:T.cardBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:10,padding:'12px 14px'}},
           e('p',{style:{...mono,fontSize:10,color:T.textSub,marginBottom:4}},label.toUpperCase()),
