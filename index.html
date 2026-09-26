@@ -53,7 +53,7 @@ const MESSAGES = {
     (p,d) => `Fase ${p} fuldført på ${d} dage. Din dagsdosis er nu ${TAPER[p]?.from ?? 0} mg — en reduktion på ${(25 - (TAPER[p]?.from ?? 0)).toFixed(1)} mg siden start.`,
     (p,d) => `${d} dage gennemført. Nervesystemet har tilpasset sig endnu en reduktion. Det sker ikke hurtigt — men det sker.`,
     (_,d) => `Hver fase er ${DAYS} dage. Du har nu lagt ${d} bag dig. Det er mere end de fleste tror de kan.`,
-    (p) => `Du er nu på ${TAPER[p]?.from ?? 0} mg. Citaloprams halveringstid er ca. 35 timer — din krop har haft god tid til at finde fodfæste.`,
+    (p) => `Du er nu på ${TAPER[p]?.from ?? 0} mg. Sertralins halveringstid er ca. 26 timer — din krop har haft god tid til at finde fodfæste.`,
   ],
   varm: [
     () => `Det tog mod at starte. Det tager mere at fortsætte. Du er her stadig.`,
@@ -67,7 +67,7 @@ const MESSAGES = {
     (p) => `Under ${TAPER[p]?.from ?? 20} mg begynder serotonintransporterbindingen at normaliseres. Drømme kan blive mere levende — det er et godt tegn.`,
     () => `Hyperbolsk nedtrapning — det du følger — sikrer at hver reduktion svarer til nogenlunde samme neurobiologiske belastning. Det er videnskaben bag din metode.`,
     () => `Langsom nedtrapning giver hypothalamus og amygdala tid til at rekalibrere. Mild forbigående uro er forventet og forbigående.`,
-    () => `Citalopram virker primært via serotonintransportere. Med langsommere nedtrapning kan hjernen gradvis opregulere sine egne receptorer frem for at kompensere akut.`,
+    () => `Sertralin virker primært via serotonintransportere. Med langsommere nedtrapning kan hjernen gradvis opregulere sine egne receptorer frem for at kompensere akut.`,
   ],
   fremadskuende: [
     () => `Mange beskriver øget emotionel nuance i månederne efter endt nedtrapning. Ikke bare glæde — men hele paletten.`,
@@ -150,55 +150,39 @@ function TaperCurve({ checked, startDate, T }) {
   const W = 440, H = 200, PL = 40, PR = 20, PT = 16, PB = 32;
   const iW = W-PL-PR, iH = H-PT-PB;
 
-  // Build actual progress points: one point per phase
-  const points = TAPER.map((ph, i) => {
-    const done = Object.values(checked[i]||{}).filter(Boolean).length;
-    return { phase:i, mg: ph.from, doneDays: done };
-  });
-
-  // Days per phase actually used (done days, min 0)
-  // For future phases, estimate DAYS per phase
-  const start = startDate ? new Date(startDate) : new Date();
-
-  // Build timeline: for each phase boundary, compute the date
-  // Past: use actual done days. Future: use DAYS per phase
-  let cumulDays = 0;
-  const phaseStartDays = [0];
-  TAPER.forEach((ph, i) => {
-    const done = Object.values(checked[i]||{}).filter(Boolean).length;
-    // if phase complete use done days, else use DAYS for future
-    const used = (i < TAPER.length && done > 0) ? Math.max(done, DAYS) : DAYS;
-    cumulDays += used;
-    phaseStartDays.push(cumulDays);
-  });
-
-  const totalDays = phaseStartDays[TAPER.length];
+  const totalDays = TAPER.length * DAYS;
   const maxMg = 25;
 
   function dayToX(day) { return PL + (day/totalDays)*iW; }
   function mgToY(mg)   { return PT + iH - (mg/maxMg)*iH; }
 
-  // Current position
+  // Build ALL daily points across all phases
+  // Each phase has DAYS daily dose values from getDoses(from, to)
+  const allDailyPts = [];
+  TAPER.forEach((ph, pi) => {
+    const doses = getDoses(ph.from, ph.to);
+    doses.forEach((mg, di) => {
+      allDailyPts.push({ day: pi*DAYS + di, mg });
+    });
+  });
+  // Add final 0mg endpoint
+  allDailyPts.push({ day: totalDays, mg: 0 });
+
+  // Count total checked days to find current position
   const totalDone = Object.values(checked).reduce((s,d)=>s+Object.values(d).filter(Boolean).length,0);
-  const currentX = dayToX(totalDone);
-  const currentPhase = TAPER.findIndex((_,i)=>Object.values(checked[i]||{}).filter(Boolean).length<DAYS);
-  const currentMg = currentPhase>=0 ? TAPER[currentPhase].from : 0;
-  const currentY = mgToY(currentMg);
 
-  // Build SVG path points for past (solid) and future (dashed)
-  const allPoints = TAPER.map((ph,i) => ({
-    x: dayToX(phaseStartDays[i]),
-    y: mgToY(ph.from),
-  }));
-  allPoints.push({ x: dayToX(phaseStartDays[TAPER.length]), y: mgToY(0) });
+  // Build past and future points - share exactly one point at junction
+  const pastPts = allDailyPts.filter(p => p.day <= totalDone);
+  if (pastPts.length === 0) pastPts.push(allDailyPts[0]);
+  const lastPastDay = pastPts[pastPts.length-1].day;
+  const futurePts = allDailyPts.filter(p => p.day >= lastPastDay);
 
-  // Find the index of the last past point and first future point
-  // so the two paths share exactly one point (the junction)
-  const junctionIdx = allPoints.reduce((last, _, i) => phaseStartDays[i] <= totalDone ? i : last, 0);
-  const pastPoints   = allPoints.slice(0, junctionIdx + 1);
-  const futurePoints = allPoints.slice(junctionIdx);
-
+  // Convert to SVG coords
+  const toPt = p => ({ x: dayToX(p.day), y: mgToY(p.mg) });
   const toPath = pts => pts.map((p,i)=>`${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+  const pastPoints   = pastPts.map(toPt);
+  const futurePoints = futurePts.map(toPt);
 
   // Month labels on x-axis - skip to avoid overlap
   const monthLabels = [];
@@ -254,6 +238,64 @@ function TaperCurve({ checked, startDate, T }) {
   );
 }
 
+
+// ── Confetti ──────────────────────────────────────────────────────────────────
+function useConfetti() {
+  const canvasRef = useRef(null);
+  const activeRef = useRef(false);
+
+  function launch() {
+    const canvas = canvasRef.current;
+    if (!canvas || activeRef.current) return;
+    activeRef.current = true;
+    canvas.style.display = 'block';
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext('2d');
+    const colors = ['#16a34a','#60a5fa','#f472b6','#fbbf24','#a78bfa','#34d399','#f87171','#38bdf8'];
+    const pieces = Array.from({length:120}, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * -canvas.height * 0.5 - 10,
+      r: Math.random() * 7 + 4,
+      color: colors[Math.floor(Math.random()*colors.length)],
+      vx: (Math.random()-0.5) * 3,
+      vy: Math.random() * 4 + 2,
+      angle: Math.random()*Math.PI*2,
+      va: (Math.random()-0.5) * 0.2,
+      shape: Math.random() > 0.5 ? 'rect' : 'circle',
+      w: Math.random() * 12 + 6,
+      h: Math.random() * 6 + 4,
+    }));
+    let frame;
+    const startTime = Date.now();
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      const elapsed = Date.now() - startTime;
+      const fade = Math.max(0, 1 - Math.max(0,(elapsed-2200)/800));
+      pieces.forEach(p => {
+        p.x += p.vx; p.y += p.vy + 0.05; p.angle += p.va;
+        ctx.save();
+        ctx.globalAlpha = fade * (p.y < canvas.height ? 1 : 0);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.angle);
+        ctx.fillStyle = p.color;
+        if (p.shape === 'circle') {
+          ctx.beginPath(); ctx.arc(0,0,p.r,0,Math.PI*2); ctx.fill();
+        } else {
+          ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+        }
+        ctx.restore();
+      });
+      if (elapsed < 3000) { frame = requestAnimationFrame(draw); }
+      else { canvas.style.display='none'; activeRef.current=false; }
+    }
+    draw();
+    return () => { cancelAnimationFrame(frame); canvas.style.display='none'; activeRef.current=false; };
+  }
+  const ConfettiCanvas = e('canvas', { ref:canvasRef, style:{position:'fixed',inset:0,zIndex:999,pointerEvents:'none',display:'none'} });
+  return { launch, ConfettiCanvas };
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const init = load();
@@ -270,6 +312,7 @@ function App() {
   const [milestone,    setMilestone] = useState(null);   // {icon,title,sub,msg,lookback}
   const prevPhaseRef = useRef(phase);
 
+  const { launch: launchConfetti, ConfettiCanvas } = useConfetti();
   const T = THEMES[themeKey];
   const mono = { fontFamily:"'DM Mono', monospace" };
 
@@ -304,6 +347,7 @@ function App() {
       msg: msgFn(phase+1, totalDone),
       lookback: lookbackFn(totalDone, mgFrom, mgNow),
     });
+    launchConfetti();
   }, [phase]);
 
   const interval       = TAPER[phase] || TAPER[TAPER.length-1];
@@ -428,9 +472,9 @@ function App() {
   const Header = e('div',{style:{padding:'28px 24px 20px',borderBottom:`1.5px solid ${T.cardBorder}`,background:T.headerBg}},
     e('div',{style:{maxWidth:480,margin:'0 auto'}},
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}},
-        e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.15em',textTransform:'uppercase'}},'Citalopram nedtrapning'),
+        e('p',{style:{...mono,fontSize:10,color:T.textSub,letterSpacing:'0.15em',textTransform:'uppercase'}},'Sertralin nedtrapning'),
         e('button',{onClick:()=>setShowSettings(true),style:{background:T.progressBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:8,padding:'5px 10px',fontSize:16,color:T.textMuted,display:'flex',alignItems:'center',gap:4}},
-          '⚙️',e('span',{style:{...mono,fontSize:9,color:T.textSub}},'v2'))
+          '⚙️',e('span',{style:{...mono,fontSize:9,color:T.textSub}},'v2.1'))
       ),
       e('h1',{style:{fontFamily:"'Playfair Display', serif",fontSize:28,fontWeight:700,color:T.accentDark,marginBottom:16}},`${interval.from} → ${interval.to} mg`),
       e('div',{style:{marginBottom:14}},
@@ -506,7 +550,7 @@ function App() {
             e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
               e('div',null,
                 e('p',{style:{fontSize:14,color:T.text}},'Tablet (mg)'),
-                e('p',{style:{...mono,fontSize:10,color:T.textSub,marginTop:2}},'½ af 50mg tablet')
+                
               ),
               e('div',{style:{display:'flex',alignItems:'center',gap:6}},
                 tabletLocked
@@ -514,7 +558,7 @@ function App() {
                   : e('input',{className:'num-input',type:'number',step:'0.5',min:'0.5',value:tabletMg,
                       style:{background:T.inputBg,borderColor:'#f59e0b',color:T.accentDark,width:90},
                       onChange:ev=>setTabletMg(ev.target.value)}),
-                e('button',{onClick:()=>setTabletLocked(l=>{if(!l)setTabletMg(v=>v||'25');return !l;}),
+                e('button',{onClick:()=>setTabletLocked(l=>!l),
                   style:{width:36,height:36,borderRadius:8,border:`1.5px solid ${tabletLocked?T.cardBorder:'#f59e0b'}`,
                     background:tabletLocked?T.progressBg:'#fef3c7',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
                   tabletLocked?'🔒':'🔓')
@@ -593,7 +637,7 @@ function App() {
     ),
     e('div',{style:{background:T.subBg,border:`1.5px solid ${T.cardBorder}`,borderRadius:10,padding:'10px 14px',marginBottom:10}},
       e('p',{style:{fontSize:12,color:T.textMuted}},
-        'Forslag: opløs ',e('strong',{style:{color:T.accentDark}},'25 mg'),' tablet i ',
+        `Forslag: opløs `,e('strong',{style:{color:T.accentDark}},`${tMg} mg`),` tablet i `,
         e('strong',{style:{color:T.accentDark}},`${interval.suggestedWater} ml`),' vand'
       )
     ),
@@ -606,7 +650,7 @@ function App() {
       ...doses.map((dose,i)=>{
         const isChecked=checked[phase]?.[i]||false;
         const isToday=i===todayIdx&&!phaseComplete;
-        const r=calc(25,interval.suggestedWater,dose);
+        const r=calc(tMg,interval.suggestedWater,dose);
         return e('div',{key:i,className:'row',onClick:()=>toggle(i),
           style:{display:'grid',gridTemplateColumns:'40px 1fr 72px 60px 28px',gap:6,padding:'9px 14px',
             borderBottom:i<DAYS-1?`1px solid ${T.subBorder}`:'none',
@@ -652,6 +696,7 @@ function App() {
   );
 
   return e('div',{style:{background:T.bg,minHeight:'100vh'}},
+    ConfettiCanvas,
     MilestoneOverlay,
     SettingsSheet,
     Header, Tabs,
